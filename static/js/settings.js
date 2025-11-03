@@ -86,6 +86,29 @@ async function loadCurrentUser() {
     }
 }
 
+// 사용자 이름 표시
+function displayUserName(user) {
+    // 메인 헤더
+    const nameElement = document.querySelector("#user-name");
+    if (nameElement)
+        nameElement.textContent = (user && user.name) || (user && user.email) || '사용자';
+
+    // 사이드바 이름
+    document.querySelectorAll(".user-name").forEach(el => {
+        el.textContent = (user && user.name) || (user && user.email) || '사용자';
+    });
+
+    // 사이드바 이메일
+    document.querySelectorAll(".user-email").forEach(el => {
+        el.textContent = (user && user.email) || '';
+    });
+
+    // 사이드바 아바타 (선택)
+    document.querySelectorAll(".user-avatar").forEach(el => {
+        el.textContent = (user && user.name) ? user.name.charAt(0).toUpperCase() : "U";
+    });
+}
+
 // 새 함수 추가: 개인정보 섹션의 Input 필드에 사용자 정보와 로컬 설정을 주입
 function fillPersonalInfoFields(user) {
     // 1. API에서 가져온 사용자 정보 주입
