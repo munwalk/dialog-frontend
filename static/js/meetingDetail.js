@@ -23,12 +23,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // 사이드바 로드
     fetch("components/sidebar.html")
         .then(res => res.text())
-        .then(html => {
+        .then(async html => {
             const sidebar = document.getElementById("sidebar-container");
             sidebar.innerHTML = html;
 
             // ✅ 사이드바 로드 후 사용자 정보 주입
-            injectUserInfo();
+            await loadCurrentUser();
 
             // 현재 페이지 활성화
             const currentPage = window.location.pathname.split("/").pop();
@@ -47,63 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error('사이드바 로드 실패:', error);
         });
 });
-
-/* ===============================
-   사용자 정보 표시 함수
-=================================*/
-function injectUserInfo() {
-    // localStorage에서 사용자 정보 가져오기
-    let user = null;
-    const userData = localStorage.getItem("user");
-    
-    if (userData) {
-        try { 
-            user = JSON.parse(userData); 
-        } catch(e) { 
-            console.error('사용자 정보 파싱 실패:', e);
-        }
-    }
-    
-    // JWT 토큰에서 정보 추출 시도
-    if (!user) {
-        const token = getCookie('jwt') || localStorage.getItem('accessToken');
-        if (token) {
-            const payload = parseJwt(token);
-            if (payload) {
-                user = { 
-                    name: payload.name || payload.email || "사용자", 
-                    email: payload.email || "" 
-                };
-            }
-        }
-    }
-
-    // 사용자 정보가 있으면 표시
-    if (user) {
-        // 이름 표시 (.user-name 셀렉터 사용)
-        document.querySelectorAll(".user-name").forEach(el => {
-            el.textContent = user.name || "사용자";
-        });
-        
-        // 이메일 표시
-        document.querySelectorAll(".user-email").forEach(el => {
-            el.textContent = user.email || "";
-        });
-        
-        // 아바타 표시
-        document.querySelectorAll(".user-avatar").forEach(el => {
-            el.textContent = user.name ? user.name.charAt(0).toUpperCase() : "U";
-        });
-        
-        console.log("✅ 로그인 사용자 표시:", user.name);
-    } else {
-        console.warn("⚠️ 로그인 정보 없음");
-        // 필요시 로그인 페이지로 리다이렉트
-        // window.location.href = 'login.html';
-    }
-}
-
-
 
 let isEditMode = false;
 let originalContent = '';

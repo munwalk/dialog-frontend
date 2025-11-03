@@ -1,43 +1,52 @@
 /* ===============================
-   Chatbot & Sidebar Fetch
+    Chatbot & Sidebar Fetch
 =================================*/
-document.addEventListener("DOMContentLoaded", () => {
-    // 챗봇 로드
+// 페이지(HTML) 로드가 완료되면(DOMContentLoaded) async(비동기)로 함수를 실행합니다.
+document.addEventListener("DOMContentLoaded", async () => {
+    // (핵심) 페이지 로드 시, 가장 먼저 사용자 정보를 비동기로 가져옵니다.
+    const loggedInUser = await loadCurrentUser();
+
+    // 1. 챗봇 컴포넌트(HTML)를 불러와서 페이지에 삽입
     fetch("components/chatbot.html")
         .then(res => res.text())
         .then(html => {
+            // 'chatbot-container' ID를 가진 요소에 불러온 HTML을 삽입
             const container = document.getElementById("chatbot-container");
             container.innerHTML = html;
 
+            // 챗봇 내부의 버튼/입력창 요소를 찾습니다.
             const closeBtn = container.querySelector(".close-chat-btn");
             const sendBtn = container.querySelector(".send-btn");
             const chatInput = container.querySelector("#chatInput");
             const floatingBtn = document.getElementById("floatingChatBtn");
 
+            // 찾은 요소들에 클릭/키보드 이벤트 리스너를 연결합니다.
             if (closeBtn) closeBtn.addEventListener("click", closeChat);
             if (sendBtn) sendBtn.addEventListener("click", sendMessage);
             if (chatInput) chatInput.addEventListener("keypress", handleChatEnter);
             if (floatingBtn) floatingBtn.addEventListener("click", openChat);
         });
-
-    // 사이드바 로드
+    
+    // 2. 사이드바 컴포넌트(HTML)를 불러와서 페이지에 삽입
     fetch("components/sidebar.html")
         .then(res => res.text())
-        .then(html => {
+        .then(async html => {
             const sidebar = document.getElementById("sidebar-container");
             sidebar.innerHTML = html;
 
-            // ✅ 사이드바 로드 후 사용자 정보 주입
-            injectUserInfo();
+            // (재사용) 처음에 가져온 사용자 정보(loggedInUser)로 사이드바 UI를 채웁니다.
+            if (loggedInUser) {
+                displayUserName(loggedInUser); 
+            }
 
-            // 현재 페이지 활성화
+            // (UI/UX) 현재 URL을 확인하여 일치하는 사이드바 메뉴에 'active' 클래스를 추가합니다.
             const currentPage = window.location.pathname.split("/").pop();
             const navItems = sidebar.querySelectorAll(".nav-menu a");
 
             navItems.forEach(item => {
-                const linkPath = item.getAttribute("href");
+                const linkPath = item.getAttribute("href"); // 예: 'settings.html'
                 if (linkPath === currentPage) {
-                    item.classList.add("active");
+                    item.classList.add("active"); // 일치하면 'active' 클래스 추가
                 } else {
                     item.classList.remove("active");
                 }
@@ -46,83 +55,51 @@ document.addEventListener("DOMContentLoaded", () => {
         .catch(error => {
             console.error('사이드바 로드 실패:', error);
         });
+
+    // 3. (재사용) 처음에 가져온 사용자 정보로 '개인정보' 섹션의 입력 필드를 채웁니다.
+    if (loggedInUser) {
+        fillPersonalInfoFields(loggedInUser);
+    }
 });
 
-/* ===============================
-   사용자 정보 표시 함수
-=================================*/
-function injectUserInfo() {
-    // localStorage에서 사용자 정보 가져오기
-    let user = null;
-    const userData = localStorage.getItem("user");
-
-    if (userData) {
-        try {
-            user = JSON.parse(userData);
-        } catch (e) {
-            console.error('사용자 정보 파싱 실패:', e);
+// (API 호출 1) 백엔드에 현재 로그인한 사용자 정보를 요청 (GET)
+async function loadCurrentUser() {
+    try {
+        const response = await fetch('http://localhost:8080/api/auth/me', {
+            credentials: 'include' // (중요) 인증 쿠키(세션)를 요청에 포함시킵니다.
+        });
+        if (response.ok) {
+            const user = await response.json(); // { "name": "...", "email": "..." }
+            return user; // 사용자 정보 객체 반환
+        } else if (response.status === 401) {
+            // 401 Unauthorized: 로그인되지 않은 사용자면 로그인 페이지로 보냅니다.
+            window.location.href = '/login.html';
+            return null;
+        } else {
+            // 404, 500 등 기타 에러 시, 사용자 이름을 'null'로 처리하여 기본값으로 표시
+            displayUserName(null);
+            return null;
         }
-    }
-
-    // JWT 토큰에서 정보 추출 시도
-    if (!user) {
-        const token = getCookie('jwt') || localStorage.getItem('accessToken');
-        if (token) {
-            const payload = parseJwt(token);
-            if (payload) {
-                user = {
-                    name: payload.name || payload.email || "사용자",
-                    email: payload.email || ""
-                };
-            }
-        }
-    }
-
-    // 사용자 정보가 있으면 표시
-    if (user) {
-        // 이름 표시 (.user-name 셀렉터 사용)
-        document.querySelectorAll(".user-name").forEach(el => {
-            el.textContent = user.name || "사용자";
-        });
-
-        // 이메일 표시
-        document.querySelectorAll(".user-email").forEach(el => {
-            el.textContent = user.email || "";
-        });
-
-        // 아바타 표시
-        document.querySelectorAll(".user-avatar").forEach(el => {
-            el.textContent = user.name ? user.name.charAt(0).toUpperCase() : "U";
-        });
-
-        console.log("✅ 로그인 사용자 표시:", user.name);
-    } else {
-        console.warn("⚠️ 로그인 정보 없음");
-        // 필요시 로그인 페이지로 리다이렉트
-        // window.location.href = 'login.html';
+    } catch (error) {
+        console.error('네트워크 오류', error);
+        return null;
     }
 }
 
-// 로그인 정보 (실제로는 세션이나 서버에서 가져와야 함)
-const loggedInUser = {
-    name: '홍길동',
-    email: 'hong@example.com'
-};
+// 새 함수 추가: 개인정보 섹션의 Input 필드에 사용자 정보와 로컬 설정을 주입
+function fillPersonalInfoFields(user) {
+    // 1. API에서 가져온 사용자 정보 주입
+    document.getElementById('userName').value = user.name || '';
+    document.getElementById('userEmail').value = user.email || '';
 
-// 페이지 로드 시 저장된 설정 불러오기
-window.addEventListener('DOMContentLoaded', function () {
-    // 로그인 정보로 이름과 이메일 자동 입력
-    document.getElementById('userName').value = loggedInUser.name;
-    document.getElementById('userEmail').value = loggedInUser.email;
-
-    // 저장된 직무 및 직급 불러오기
+    // 2. 저장된 직무 및 직급 불러오기 (로컬 스토리지)
     const savedSettings = localStorage.getItem('userSettings');
     if (savedSettings) {
         const userData = JSON.parse(savedSettings);
         document.getElementById('jobSelect').value = userData.job || '';
         document.getElementById('positionSelect').value = userData.position || '';
     }
-});
+}
 
 // 개인정보 섹션 토글
 function togglePersonalInfo() {
@@ -131,12 +108,14 @@ function togglePersonalInfo() {
 }
 
 // 개인정보 저장
-function savePersonalInfo() {
+async function savePersonalInfo() {
+    // 1. 현재 폼에 입력된 값들을 가져옵니다.
     const userName = document.getElementById('userName').value;
     const userEmail = document.getElementById('userEmail').value;
     const jobSelect = document.getElementById('jobSelect').value;
     const positionSelect = document.getElementById('positionSelect').value;
 
+    // 2. 유효성 검사 (간단)
     if (!jobSelect) {
         alert('직무를 선택해주세요.');
         return;
@@ -147,6 +126,7 @@ function savePersonalInfo() {
         return;
     }
 
+    // 3. 백엔드로 보낼 데이터 객체(DTO) 생성
     const userData = {
         name: userName,
         email: userEmail,
@@ -154,8 +134,32 @@ function savePersonalInfo() {
         position: positionSelect
     };
 
+    // 4. 브라우저(localStorage)에도 설정을 저장 (새로고침해도 유지되도록)
     localStorage.setItem('userSettings', JSON.stringify(userData));
     showSuccessMessage('개인정보가 저장되었습니다.');
+
+    // 5. (핵심) 백엔드 API에 PUT 요청을 보내 DB 업데이트를 시도합니다.
+    try {
+        const response = await fetch('http://localhost:8080/api/user/settings', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify(userData)
+        });
+
+        // 6. 저장 성공/실패에 따른 피드백
+        if (response.ok) {
+            showSuccessMessage('개인정보가 성공적으로 저장되었습니다.');
+        } else {
+            const errorData = await response.json();
+            alert('저장에 실패했습니다: ' + (errorData.message || response.statusText));
+        }
+    } catch (error) {
+        console.error('프로필 업데이트 네트워크 오류', error);
+        alert('서버와 통신 중 오류가 발생했습니다.');
+    }
 }
 
 // 가이드 상세 페이지 표시
@@ -215,10 +219,12 @@ function showSuccessMessage(message) {
         <span>${message}</span>
     `;
 
+    // 3. body 태그에 생성한 div를 추가하여 화면에 표시합니다.
     document.body.appendChild(messageDiv);
 
+    // 4. 3초(3000ms) 후에 팝업이 사라지도록 설정합니다.
     setTimeout(() => {
-        messageDiv.style.animation = 'slideOutRight 0.3s ease';
-        setTimeout(() => messageDiv.remove(), 300);
+        messageDiv.style.animation = 'slideOutRight 0.3s ease'; // 사라지는 애니메이션
+        setTimeout(() => messageDiv.remove(), 300); // 애니메이션 후 DOM에서 제거
     }, 3000);
 }

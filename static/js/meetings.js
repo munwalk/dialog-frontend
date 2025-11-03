@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
             sidebar.innerHTML = html;
 
             // ✅ 사이드바 로드 후 사용자 정보 주입
-            injectUserInfo();
+            loadCurrentUser();
 
             // 현재 페이지 활성화
             const currentPage = window.location.pathname.split("/").pop();
@@ -48,59 +48,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 });
 
-/* ===============================
-   사용자 정보 표시 함수
-=================================*/
-function injectUserInfo() {
-    // localStorage에서 사용자 정보 가져오기
-    let user = null;
-    const userData = localStorage.getItem("user");
-    
-    if (userData) {
-        try { 
-            user = JSON.parse(userData); 
-        } catch(e) { 
-            console.error('사용자 정보 파싱 실패:', e);
-        }
-    }
-    
-    // JWT 토큰에서 정보 추출 시도
-    if (!user) {
-        const token = getCookie('jwt') || localStorage.getItem('accessToken');
-        if (token) {
-            const payload = parseJwt(token);
-            if (payload) {
-                user = { 
-                    name: payload.name || payload.email || "사용자", 
-                    email: payload.email || "" 
-                };
-            }
-        }
-    }
 
-    // 사용자 정보가 있으면 표시
-    if (user) {
-        // 이름 표시 (.user-name 셀렉터 사용)
-        document.querySelectorAll(".user-name").forEach(el => {
-            el.textContent = user.name || "사용자";
-        });
-        
-        // 이메일 표시
-        document.querySelectorAll(".user-email").forEach(el => {
-            el.textContent = user.email || "";
-        });
-        
-        // 아바타 표시
-        document.querySelectorAll(".user-avatar").forEach(el => {
-            el.textContent = user.name ? user.name.charAt(0).toUpperCase() : "U";
-        });
-        
-        console.log("✅ 로그인 사용자 표시:", user.name);
+
+// 사용자 정보 로드 함수 (API에서만)
+async function loadCurrentUser() {
+  try {
+    const response = await fetch('http://localhost:8080/api/auth/me', {
+      credentials: 'include'  // 이 옵션만 있으면 브라우저가 HttpOnly 쿠키를 요청에 자동 포함!
+    });
+    if (response.ok) {
+      const user = await response.json();
+      displayUserName(user);
+      return user;
+    } else if (response.status === 401) {
+      window.location.href = '/login.html';
+      return null;
     } else {
-        console.warn("⚠️ 로그인 정보 없음");
-        // 필요시 로그인 페이지로 리다이렉트
-        // window.location.href = 'login.html';
+      displayUserName(null);
+      return null;
     }
+  } catch (error) {
+    console.error('네트워크 오류', error);
+    displayUserName(null);
+    return null;
+  }
 }
 
 // 검색 토글

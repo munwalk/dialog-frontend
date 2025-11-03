@@ -23,12 +23,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // 사이드바 로드
     fetch("components/sidebar.html")
         .then(res => res.text())
-        .then(html => {
+        .then(async html => {
             const sidebar = document.getElementById("sidebar-container");
             sidebar.innerHTML = html;
 
             // ✅ 사이드바 로드 후 사용자 정보 주입
-            loadCurrentUser();
+            await loadCurrentUser();
 
             // 현재 페이지 활성화
             const currentPage = window.location.pathname.split("/").pop();
@@ -47,7 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error('사이드바 로드 실패:', error);
         });
 });
-
 
 // localStorage 키
 const STORAGE_KEY = 'calendar_events';
@@ -361,10 +360,6 @@ async function initHome() {
     renderImportantMeetings(globalEvents);
     renderRecentMeetings(globalEvents);
 
-    // 사용자 정보 비동기로 가져와서 표시됨
-    const user = await loadCurrentUser();
-    console.log("✅ 불러온 사용자 정보:", user);
-
     console.log('✅ 홈 페이지 초기화 완료');
 }
 
@@ -396,56 +391,9 @@ function goToMeetings() {
     window.location.href = 'meetings.html';
 }
 
-// 사용자 정보 로드 함수 (API에서만)
-async function loadCurrentUser() {
-  try {
-    const response = await fetch('http://localhost:8080/api/auth/me', {
-      credentials: 'include'  // 이 옵션만 있으면 브라우저가 HttpOnly 쿠키를 요청에 자동 포함!
-    });
-    if (response.ok) {
-      const user = await response.json();
-      displayUserName(user);
-      return user;
-    } else if (response.status === 401) {
-      window.location.href = '/login.html';
-      return null;
-    } else {
-      displayUserName(null);
-      return null;
-    }
-  } catch (error) {
-    console.error('네트워크 오류', error);
-    displayUserName(null);
-    return null;
-  }
-}
-
-// 사용자 이름 표시
-function displayUserName(user) {
-    // 메인 헤더
-    const nameElement = document.querySelector("#user-name");
-    if (nameElement)
-        nameElement.textContent = (user && user.name) || (user && user.email) || '사용자';
-
-    // 사이드바 이름
-    document.querySelectorAll(".user-name").forEach(el => {
-        el.textContent = (user && user.name) || (user && user.email) || '사용자';
-    });
-
-    // 사이드바 이메일
-    document.querySelectorAll(".user-email").forEach(el => {
-        el.textContent = (user && user.email) || '';
-    });
-
-    // 사이드바 아바타 (선택)
-    document.querySelectorAll(".user-avatar").forEach(el => {
-        el.textContent = (user && user.name) ? user.name.charAt(0).toUpperCase() : "U";
-    });
-}
-
 // DOMContentLoaded 시 초기화
 document.addEventListener('DOMContentLoaded', () => {
-    loadCurrentUser();
+    // loadCurrentUser();
     initHome();
 });
 
