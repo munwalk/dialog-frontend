@@ -1,7 +1,5 @@
-let speakerAnalysisToken = null;
-let speakerAnalysisCheckInterval = null;
-
 /* 전역 변수 */
+let speakerAnalysisToken = null;
 let meetingData = null;
 let speakerMappingData = {};
 let actionItems = [];
@@ -12,6 +10,7 @@ let originalSummaryData = {};
 let currentMappingSpeaker = null;
 let currentUserName = null;
 let tempSelectedParticipant = null;
+
 
 /* ===============================
    Chatbot & Sidebar Fetch
@@ -93,7 +92,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.log("🎤 저장된 발화자 분석 토큰 발견:", savedToken);
       speakerAnalysisToken = savedToken;
       sessionStorage.removeItem("speakerAnalysisToken");
-      startCheckingSpeakerAnalysisResult();
+    //   startCheckingSpeakerAnalysisResult();
   } 
   
   // 발화자 분석 상태 체크 및 UI 업데이트
@@ -212,180 +211,124 @@ function showErrorMessage(msg) {
 /* ===============================
    발화자 분석 함수들
 =================================*/
+async function startSpeakerAnalysis(audioUrl) {
+  console.log("발화자 분석 시작 요청:", audioUrl);
 
-// 발화자 분석 시작 함수
-async function startSpeakerAnalysis(fileUrl) {
-    if (!fileUrl) {
-        console.error("❌ 발화자 분석 시작 실패: fileUrl이 없습니다.");
-        showErrorMessage("오디오 파일 URL이 없어 발화자 분석을 시작할 수 없습니다.");
-        return;
-    }
+  try {
+    const res = await fetch("/api/analyze/object", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file_url: audioUrl,
+        language: "ko",
+        speaker_min: 2,
+        speaker_max: 10
+      })
+    });
 
-    console.log("🎤 발화자 분석 시작 요청:", fileUrl);
-    showLoadingMessage("발화자 분석을 시작합니다...");
+    if (!res.ok) throw new Error("발화자 분석 요청 실패: " + res.status);
 
-    try {
-        const response = await fetch("http://localhost:8000/api/analyze/object", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                file_url: fileUrl,
-                language: "ko",
-                speaker_min: -1,
-                speaker_max: -1
-            })
-        });
+    const data = await res.json();
+    const token = data.token;
+    const filename = data.original_filename;
 
-        if (!response.ok) {
-            throw new Error(`발화자 분석 요청 실패: ${response.status}`);
-        }
+    console.log("token:", token, " filename:", filename);
 
-        const result = await response.json();
-        speakerAnalysisToken = result.token;
-        
-        console.log("✅ 발화자 분석 토큰 받음:", speakerAnalysisToken);
-        hideLoadingMessage(); // 로딩 메시지 숨기기
-        showSuccessMessage(`발화자 분석이 시작되었습니다.`);
+    // filename 포함해서 polling 시작
+    pollSpeakerResult(token, filename);
 
-        // 주기적으로 결과 확인 (3초마다)
-        startCheckingSpeakerAnalysisResult();
-
-    } catch (error) {
-        hideLoadingMessage(); // 에러 시 로딩 메시지 숨기기
-        console.error("❌ 발화자 분석 시작 오류:", error);
-        showErrorMessage("발화자 분석 시작에 실패했습니다.");
-    }
+  } catch (err) {
+    console.error("발화자 분석 시작 오류:", err);
+  }
 }
 
-// 발화자 분석 결과 주기적 확인
-function startCheckingSpeakerAnalysisResult() {
-    if (!speakerAnalysisToken) {
-        console.error("❌ 발화자 분석 토큰이 없습니다.");
-        return;
+// ================================
+// JSON polling
+// ================================
+async function pollSpeakerResult(token, filename) {
+  console.log("JSON polling 시작...");
+
+  // filename 반드시 포함해야 Object Storage JSON 찾을 수 있음
+  const url = `/api/analyze/${token}?filename=${filename}`;
+
+  let tryCount = 0;
+
+  const timer = setInterval(async () => {
+    tryCount++;
+    console.log(`🔍 polling... (${tryCount})`);
+
+    const res = await fetch(url);
+    if (!res.ok) return; // 아직 JSON 안 만들어짐
+
+    const result = await res.json();
+
+    if (result.success) {
+      clearInterval(timer);
+      console.log("🎉 발화자 분석 완료:", result);
+
+      window.speakerAnalysisResult = result;
+      renderSpeakerResult(result);
     }
-
-    if (speakerAnalysisCheckInterval) {
-        clearInterval(speakerAnalysisCheckInterval);
-    }
-
-    let checkCount = 0;
-    const maxChecks = 60; // 최대 3분 (3초 × 60)
-
-    console.log("⏳ 발화자 분석 결과 확인 시작...");
-    showLoadingMessage("발화자 분석 결과 확인 중..."); 
-    
-    speakerAnalysisCheckInterval = setInterval(async () => {
-        checkCount++;
-
-        if (checkCount > maxChecks) {
-            clearInterval(speakerAnalysisCheckInterval);
-            hideLoadingMessage(); 
-            showErrorMessage("발화자 분석 시간이 초과되었습니다.");
-            return;
-        }
-
-        try {
-            const response = await fetch(`http://localhost:8000/api/analyze/${speakerAnalysisToken}`);
-            
-            if (!response.ok) {
-                throw new Error(`결과 조회 실패: ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            if (result.status === "COMPLETED" || result.success) {
-                clearInterval(speakerAnalysisCheckInterval);
-                hideLoadingMessage(); 
-                console.log("발화자 분석 완료!", result);
-                
-                // meetingData에 발화자 분석 결과 저장
-                if (meetingData) {
-                    meetingData.speakerAnalysis = result;
-                    
-                    // segments를 transcripts 형식으로 변환
-                    if (result.segments && Array.isArray(result.segments)) {
-                        meetingData.transcripts = result.segments.map((seg, idx) => ({
-                            // speakerName과 speaker(ID)를 명확히 구분
-                            speaker: seg.speaker?.name || `화자${seg.speaker?.label || 0}`, // 이것을 ID로 사용
-                            speakerName: seg.speaker?.name || `화자${seg.speaker?.label || 0}`, // 이것을 이름으로 사용
-                            speakerLabel: seg.speaker?.label,  // CLOVA label 보존
-                            time: formatTimestamp(seg.start),
-                            text: seg.text || "",
-                            startTime: seg.start,
-                            endTime: seg.end,
-                            sequenceOrder: idx,
-                            isDeleted: false
-                        }));
-                        
-                        console.log(`${meetingData.transcripts.length}개의 발화 로그 변환 완료`);
-                    }
-
-                    // 참석자 목록 업데이트
-                    if (result.speakers && Array.isArray(result.speakers)) {
-                        const speakerNames = result.speakers.map(s => s.name);
-                        // 기존 참석자 목록과 병합 (중복 제거)
-                        meetingData.participants = [...new Set([...(meetingData.participants || []), ...speakerNames])];
-                        
-                        console.log(`참석자 목록 업데이트: ${meetingData.participants.join(', ')}`);
-                    }
-
-                    // UI 업데이트
-                    displayTranscripts();
-                    updateTranscriptStats();
-                    checkMappingCompletion();
-                    checkActionGenerationButtonState(); 
-                    displayMeetingInfo(); // 참석자 수 업데이트
-                    
-                    // 발화자 분석 버튼 숨기기
-                    const analysisBtn = document.getElementById('startSpeakerAnalysisBtn');
-                    if (analysisBtn) {
-                        analysisBtn.style.display = 'none';
-                    }
-                    
-                    // 서버에 저장
-                    await saveMeetingDataToServer();
-                }
-
-                showSuccessMessage("발화자 분석이 완료되었습니다!");
-                
-            } else if (result.status === "FAILED" || result.error) {
-                clearInterval(speakerAnalysisCheckInterval);
-                hideLoadingMessage(); 
-                console.error("발화자 분석 실패:", result);
-                showErrorMessage("발화자 분석에 실패했습니다.");
-                
-                // 버튼 상태 복구
-                const analysisBtn = document.getElementById('startSpeakerAnalysisBtn');
-                if (analysisBtn) {
-                    analysisBtn.disabled = false;
-                    analysisBtn.classList.remove('analyzing');
-                    analysisBtn.querySelector('span').textContent = '발화자 구분 분석 시작';
-                }
-                
-                // 토큰 초기화
-                speakerAnalysisToken = null;
-                
-            } else {
-                // 아직 진행 중
-                const progress = result.progress || 0;
-                console.log(`발화자 분석 진행 중... ${progress}%`);
-                // 로딩 메시지 업데이트
-                const loadingToast = document.getElementById("loadingToast");
-                if (loadingToast) {
-                    loadingToast.textContent = `발화자 분석 진행 중... ${Math.round(progress)}%`;
-                }
-            }
-
-        } catch (error) {
-            console.error("발화자 분석 결과 확인 오류:", error);
-            clearInterval(speakerAnalysisCheckInterval);
-            hideLoadingMessage();
-        }
-
-    }, 3000); // 3초마다 확인
+  }, 1500);
 }
 
-// 타임스탬프 포맷팅 함수 (ms → "00:00:00")
+// ===============================
+// 발화자 분석 결과 UI 렌더링
+// ===============================
+function renderSpeakerResult(result) {
+  console.log("📌 renderSpeakerResult 호출됨:", result);
+
+  if (!result || !result.segments || result.segments.length === 0) {
+    console.warn("⚠️ 렌더링할 발화 데이터가 없습니다.");
+    return;
+  }
+
+  // 전역 transcripts 초기화
+  meetingData.transcripts = [];
+
+  result.segments.forEach((seg, index) => {
+    const speakerId = `Speaker ${seg.speaker.label}`;
+    const speakerName = seg.speaker.name || speakerId;
+
+    const transcriptObj = {
+      id: null,
+      speaker: speakerId,
+      speakerName: speakerName,
+      speakerLabel: seg.speaker.label,
+      text: seg.text,
+      startTime: seg.start,
+      endTime: seg.end,
+      time: formatTimestamp(seg.start),
+      isDeleted: false,
+      sequenceOrder: index
+    };
+
+    meetingData.transcripts.push(transcriptObj);
+
+    // 매핑 정보 저장
+    if (!speakerMappingData[speakerId]) {
+      speakerMappingData[speakerId] = speakerName;
+    }
+  });
+
+  console.log("📝 최종 생성된 transcripts:", meetingData.transcripts);
+  console.log("🧩 speakerMappingData:", speakerMappingData);
+
+  // 화면 갱신
+  displayTranscripts();
+  updateTranscriptStats();
+  checkMappingCompletion();
+  checkActionGenerationButtonState();
+
+  // 서버 저장
+  saveMeetingDataToServer();
+
+  showSuccessMessage("발화자 분석 결과가 적용되었습니다.");
+}
+
+/* ===============================
+   타임스탬프 포맷팅
+=================================*/
 function formatTimestamp(ms) {
     const totalSeconds = Math.floor(ms / 1000);
     const hours = Math.floor(totalSeconds / 3600);
@@ -396,7 +339,9 @@ function formatTimestamp(ms) {
 }
 
 
-// 발화자에게 고유 색상을 매핑하는 객체
+/* ===============================
+   발화자 색상 매핑
+=================================*/
 const speakerColorMap = {};
 let colorHUEIndex = 0;
 const HUE_STEP = 137.5;
@@ -462,7 +407,7 @@ async function loadMeetingDataFromServer() {
             showErrorModal(
                 '회의 정보 없음',
                 '회의 데이터를 불러올 수 없습니다.<br>회의를 먼저 생성하거나 진행해주세요.',
-                () => { window.location.href = 'new-meeting.html'; }
+                () => { window.location.href = 'recordSetting.html'; }
             );
             return;
         }
@@ -555,7 +500,7 @@ async function loadMeetingDataFromServer() {
         }));
 
         await loadRecording(meetingId);
-
+    
         // UI 업데이트
         displayMeetingInfo();
         displayTranscripts();
@@ -564,7 +509,20 @@ async function loadMeetingDataFromServer() {
         displayAISummary();
 
         renderActionItems();
-
+        
+        // ======================================
+        // 자동 발화자 분석 실행 지점
+        // ======================================
+        if (
+            meetingData.audioFileUrl &&
+            typeof meetingData.audioFileUrl === "string" &&
+            meetingData.audioFileUrl.startsWith("https://") &&
+            meetingData.audioFileUrl.includes("object.ncloudstorage.com")
+        ) {
+            console.log("🎤 자동 발화자 분석 시작:", meetingData.audioFileUrl);
+            startSpeakerAnalysis(meetingData.audioFileUrl);
+}
+        
         // 로컬 스토리지 백업
         localStorage.setItem("lastMeeting", JSON.stringify(meetingData));
 

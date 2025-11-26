@@ -27,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const sidebar = document.getElementById("sidebar-container");
             sidebar.innerHTML = html;
 
-            // ✅ 사이드바 로드 후 사용자 정보 주입
+            // 사이드바 로드 후 사용자 정보 주입
             loadCurrentUser();
 
             // 현재 페이지 활성화
@@ -47,8 +47,6 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error('사이드바 로드 실패:', error);
         });
 });
-
-
 
 // 사용자 정보 로드 함수 (API에서만)
 async function loadCurrentUser() {
@@ -292,6 +290,16 @@ const participantList = document.querySelector('.participants-list');
 document.querySelector('.add-participant-btn').addEventListener('click', () => {
     const name = participantInput.value.trim();
     if (!name) return;
+    
+    // 중복 체크
+    const existingParticipants = Array.from(document.querySelectorAll('.participant-name'))
+        .map(p => p.textContent.trim());
+    
+    if (existingParticipants.includes(name)) {
+        showErrorMessage('이미 추가된 참석자입니다');
+        return;
+    }
+    
     const item = document.createElement('div');
     item.className = 'participant-item';
     item.innerHTML = `
@@ -326,6 +334,16 @@ const keywordList = document.querySelector('.keywords-list');
 document.querySelector('.add-keyword-btn').addEventListener('click', () => {
     const word = keywordInput.value.trim();
     if (!word) return;
+    
+    // 중복 체크
+    const existingKeywords = Array.from(document.querySelectorAll('.keyword-tag'))
+        .map(tag => tag.textContent.replace('✕', '').trim());
+    
+    if (existingKeywords.includes(word)) {
+        showErrorMessage('이미 추가된 키워드입니다');
+        return;
+    }
+    
     const tag = document.createElement('span');
     tag.className = 'keyword-tag';
     tag.innerHTML = `${word}<button class="remove-keyword-btn">✕</button>`;
@@ -349,64 +367,12 @@ document.querySelectorAll('.remove-keyword-btn').forEach(btn => {
 });
 
 /* ===============================
-   회의 시작 / 취소 (수정된 버전)
+   회의 시작 - 개선된 버전
 =================================*/
-// document.querySelector('.btn-primary').addEventListener('click', () => {
-//     const title = document.getElementById('meeting-title');
-//     const date = document.getElementById('meeting-date');
-
-//     title.classList.remove('error');
-//     date.classList.remove('error');
-
-//     if (!title.value.trim()) {
-//         title.classList.add('error');
-//         showErrorMessage('회의 제목을 입력해주세요');
-//         return;
-//     }
-//     if (!date.value) {
-//         date.classList.add('error');
-//         showErrorMessage('회의 일시를 선택해주세요');
-//         return;
-//     }
-
-//     // 회의 데이터 수집
-//     const participants = [];
-//     document.querySelectorAll('.participant-item').forEach(item => {
-//         participants.push(item.querySelector('.participant-name').textContent);
-//     });
-
-//     const keywords = [];
-//     document.querySelectorAll('.keyword-tag').forEach(tag => {
-//         const text = tag.textContent.replace('✕', '').trim();
-//         keywords.push(text);
-//     });
-
-//     const meetingData = {
-//         title: title.value.trim(),
-//         date: date.value,
-//         description: document.getElementById('meeting-description').value.trim(),
-//         participants: participants,
-//         keywords: keywords
-//     };
-
-//     // LocalStorage에 저장
-//     localStorage.setItem('currentMeeting', JSON.stringify(meetingData));
-
-//     showSuccessMessage('회의가 시작됩니다!');
-    
-//     // 1초 후에 페이지 이동
-//     setTimeout(() => {
-//         window.location.href = 'recording.html';
-//     }, 1000);
-// });
-
-/* ===============================
-   회의 시작 / 취소 (Spring 연결 버전) 10.23 일 수정
-=================================*/
-document.querySelector('.btn-primary').addEventListener('click', () => {
+document.querySelector('.btn-primary').addEventListener('click', async () => {
     const title = document.getElementById('meeting-title');
     const date = document.getElementById('meeting-scheduledAt');
-    const description = document.getElementById('meeting-description'); // 여기 추가
+    const description = document.getElementById('meeting-description');
 
     // 에러 표시 초기화
     title.classList.remove('error');
@@ -424,9 +390,16 @@ document.querySelector('.btn-primary').addEventListener('click', () => {
         return;
     }
 
+    // 참석자가 없으면 경고
+    const participantItems = document.querySelectorAll('.participant-item');
+    if (participantItems.length === 0) {
+        showErrorMessage('최소 1명의 참석자를 추가해주세요');
+        return;
+    }
+
     // 회의 데이터 수집
     const participants = [];
-    document.querySelectorAll('.participant-item').forEach(item => {
+    participantItems.forEach(item => {
         participants.push(item.querySelector('.participant-name').textContent);
     });
 
@@ -438,48 +411,78 @@ document.querySelector('.btn-primary').addEventListener('click', () => {
 
     const fixedDate = date.value.length === 16 ? date.value + ":00" : date.value;
     const meetingData = {
-      title: title.value.trim(),
-      scheduledAt: fixedDate,
-      description: description.value.trim(),  
-      participants: participants,
-      keywords: keywords
+        title: title.value.trim(),
+        scheduledAt: fixedDate,
+        description: description.value.trim(),
+        participants: participants,
+        keywords: keywords
     };
 
     console.log("📤 서버로 보낼 회의 데이터:", meetingData);
 
-    // Spring Boot API로 전송
-    fetch("http://localhost:8080/api/meetings", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json"
-    },
-    credentials: 'include',  
-    body: JSON.stringify(meetingData)
-    })
-    .then(res => {
+    // 버튼 비활성화 (중복 클릭 방지)
+    const btn = document.querySelector('.btn-primary');
+    btn.disabled = true;
+    btn.textContent = '생성 중...';
+
+    try {
+        // Spring Boot API로 전송
+        const res = await fetch("/api/meetings", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            credentials: 'include',
+            body: JSON.stringify(meetingData)
+        });
+
+        console.log("📡 응답 상태:", res.status);
+
         if (!res.ok) {
-            throw new Error(`HTTP 오류: ${res.status}`);
+            const errorText = await res.text();
+            console.error("❌ 서버 오류 응답:", errorText);
+            throw new Error(`HTTP ${res.status}: ${errorText}`);
         }
-        return res.json();
-    })
-    .then(data => {
-        console.log("📥 서버 응답:", data);
-        if (data && data.meetingId) { 
-            showSuccessMessage('회의가 성공적으로 생성되었습니다!');
-            localStorage.setItem("currentMeetingId", data.meetingId);
-            setTimeout(() => {
-                window.location.href = 'recording.html';
-            }, 1000);
-        } else {
-            // 실패 상황 처리
-            showErrorMessage('회의 생성 실패: 예상치 못한 응답');
+
+        const data = await res.json();
+        console.log("✅ 서버 응답 데이터:", data);
+
+        if (!data || !data.meetingId) {
+            throw new Error('서버 응답에 meetingId가 없습니다');
         }
-    })
-    .catch(err => {
-        console.error("❌ 서버 요청 실패:", err);
-        showErrorMessage('서버와 통신할 수 없습니다. (백엔드 실행 중인지 확인하세요)');
-    });
+
+        // localStorage에 저장
+        localStorage.setItem("currentMeetingId", data.meetingId);
+        console.log("💾 localStorage에 저장됨:", data.meetingId);
+
+        showSuccessMessage('회의가 성공적으로 생성되었습니다!');
+
+        // 페이지 이동
+        setTimeout(() => {
+            const targetUrl = `${location.origin}/recording.html?meetingId=${data.meetingId}`;
+            console.log("🚀 페이지 이동:", targetUrl);
+            window.location.href = targetUrl;
+        }, 1000);
+
+    } catch (err) {
+        console.error("❌ 회의 생성 실패:", err);
+        showErrorMessage(`회의 생성 실패: ${err.message}`);
+        
+        // 버튼 재활성화
+        btn.disabled = false;
+        btn.textContent = '회의 시작';
+    }
 });
+
+/* ===============================
+   취소 버튼
+=================================*/
+document.querySelector('.btn-secondary').addEventListener('click', () => {
+    if (confirm('회의 설정을 취소하시겠습니까?')) {
+        window.location.href = '/dashboard.html';
+    }
+});
+
 /* ===============================
    기본 날짜 설정
 =================================*/
