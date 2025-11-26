@@ -17,10 +17,12 @@ jobs:
       
       - name: Verify Required Files
         run: |
-          test -f index.html || { echo "index.html not found"; exit 1; }
           test -d static || { echo "static directory not found"; exit 1; }
+          test -d components || { echo "components directory not found"; exit 1; }
           test -f Dockerfile || { echo "Dockerfile not found"; exit 1; }
-      
+          test -f home.html || { echo "home.html not found"; exit 1; }
+          test -f login.html || { echo "login.html not found"; exit 1; }
+          
       - name: Check HTML Syntax
         run: |
           sudo apt-get update
