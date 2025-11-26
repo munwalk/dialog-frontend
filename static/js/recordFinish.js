@@ -501,7 +501,7 @@ async function loadMeetingDataFromServer() {
                     speaker: originalId,        // 변하지 않는 ID (Speaker 1)
                     speakerName: currentName,   // 화면 표시용 이름 (가나디)
                     speakerLabel: t.speakerLabel,
-                    time: t.timeLabel || formatTimeFromMs(t.startTime),
+                    time: t.startTime !== undefined ? formatTimeFromMs(t.startTime) : (t.timeLabel || "00:00:00"),
                     text: t.text,
                     startTime: t.startTime,
                     endTime: t.endTime,
@@ -1136,7 +1136,7 @@ function renderActionItems() {
         actionItems.forEach((a, index) => {
             const isUser = a.source && a.source.toUpperCase() === 'USER';
             const sourceTag = isUser
-                ? '<span class="action-source-tag user">사용자</span>'
+                ? '<span class="action-source-tag user">사용자 생성</span>'
                 : '<span class="action-source-tag ai">AI 생성</span>';
 
             const div = document.createElement("div");
@@ -1303,7 +1303,7 @@ function renderActionItems() {
         actionItems.forEach((a, index) => {
             const isUser = a.source && a.source.toUpperCase() === 'USER';
             const sourceTag = isUser
-                ? '<span class="action-source-tag user">사용자</span>'
+                ? '<span class="action-source-tag user">사용자 생성</span>'
                 : '<span class="action-source-tag ai">AI 생성</span>';
 
             const div = document.createElement("div");
@@ -1847,7 +1847,7 @@ async function exportPDF() {
     showLoadingMessage("PDF 파일을 생성 중입니다...");
 
     try {
-        // 1. 한글 폰트 로드 (절대 경로 권장)
+        // 1. 한글 폰트 로드
         const fontPath = '/static/fonts/NotoSansKR-Regular.ttf';
         const fontResponse = await fetch(fontPath);
         
@@ -1881,10 +1881,9 @@ async function exportPDF() {
 
         doc.setFontSize(10);
         doc.setTextColor(100, 100, 100);
-        doc.text(`일시: ${data.date}  |  시간: ${data.duration}`, margin, currentY);
+        doc.text(`일시: ${data.date}  |  소요 시간: ${data.duration}`, margin, currentY);
         currentY += 6;
         
-        // 참석자 수 표시
         const partText = `참석자(${data.participantCount}명): ${data.participants.join(', ')}`;
         const partLines = doc.splitTextToSize(partText, contentWidth);
         doc.text(partLines, margin, currentY);
@@ -1902,22 +1901,27 @@ async function exportPDF() {
 
         doc.setFontSize(11);
 
-        // 중요도 표시
-        const impLevel = data.importance.level;
-        let impColor = [0, 0, 0]; // 기본 검정
-        if (impLevel === 'HIGH' || impLevel === '높음') impColor = [231, 76, 60]; // 빨강
-        else if (impLevel === 'LOW' || impLevel === '낮음') impColor = [39, 174, 96]; // 초록
+        // [수정] 중요도 색상 (CSS 뱃지 색상과 일치)
+        const impLevel = String(data.importance.level).toUpperCase();
+        let impColor = [0, 0, 0]; 
+
+        if (impLevel === 'HIGH' || impLevel === '높음') {
+            impColor = [239, 68, 68]; // Red (CSS: #ef4444)
+        } else if (impLevel === 'LOW' || impLevel === '낮음') {
+            impColor = [234, 179, 8]; // Yellow (CSS: #eab308)
+        } else {
+            // Medium / 보통
+            impColor = [249, 115, 22]; // Orange (CSS: #f97316)
+        }
         
         doc.setTextColor(...impColor);
-        doc.text(`[중요도: ${impLevel}]`, margin, currentY);
+        doc.text(`[중요도: ${data.importance.level}]`, margin, currentY);
         doc.setTextColor(80, 80, 80);
         
-        // 중요도 사유 줄바꿈 처리
         const reasonLines = doc.splitTextToSize(`- 사유: ${data.importance.reason}`, contentWidth);
         doc.text(reasonLines, margin, currentY + 6);
         currentY += (reasonLines.length * 6) + 10;
 
-        // 목적, 안건, 요약 내용
         const summaryItems = [
             { label: "회의 목적", text: data.purpose },
             { label: "주요 안건", text: data.agenda },
@@ -1925,10 +1929,10 @@ async function exportPDF() {
         ];
 
         summaryItems.forEach(item => {
-            doc.setTextColor(0, 0, 0); // 라벨 검정
+            doc.setTextColor(0, 0, 0); 
             doc.text(`[${item.label}]`, margin, currentY);
             
-            doc.setTextColor(80, 80, 80); // 내용 회색
+            doc.setTextColor(80, 80, 80);
             const textLines = doc.splitTextToSize(item.text, contentWidth - 5);
             doc.text(textLines, margin + 5, currentY + 6);
             
@@ -1937,23 +1941,23 @@ async function exportPDF() {
             if (currentY > pageHeight - margin) { doc.addPage(); currentY = 20; }
         });
 
-        // 하이라이트 키워드 (출처 표시)
+        // 하이라이트 키워드
         doc.setTextColor(0, 0, 0);
         doc.text(`[하이라이트 키워드]`, margin, currentY);
         currentY += 6;
         
         if (data.keywords.length > 0) {
-            // 가로로 나열하기 위해 텍스트 병합
             const keywordStr = data.keywords.map(k => {
                 const tag = k.source === 'AI' ? '(AI)' : '(User)';
                 return `${k.text} ${tag}`;
             }).join(',  ');
             
             const kwLines = doc.splitTextToSize(keywordStr, contentWidth - 5);
-            doc.setTextColor(41, 128, 185); // 파란색 계열
+            doc.setTextColor(41, 128, 185); 
             doc.text(kwLines, margin + 5, currentY);
             currentY += (kwLines.length * 6) + 10;
         } else {
+            doc.setTextColor(150, 150, 150);
             doc.text("키워드 없음", margin + 5, currentY);
             currentY += 10;
         }
@@ -1969,7 +1973,6 @@ async function exportPDF() {
         if (data.actions.length > 0) {
             doc.setFontSize(10);
             data.actions.forEach(action => {
-                // 출처(AI/User) 표시
                 const sourceTag = action.source === 'AI' ? '[AI]' : '[User]';
                 const actionText = `• ${sourceTag} ${action.task} (담당: ${action.assignee}, 기한: ${action.deadline})`;
                 const actionLines = doc.splitTextToSize(actionText, contentWidth);
@@ -2001,39 +2004,34 @@ async function exportPDF() {
 
         doc.setFontSize(10);
         
-        // 발화자별 색상 지정을 위한 맵
         const speakerColors = {};
-        // 사용할 색상 팔레트 (파랑, 빨강, 초록, 보라, 주황, 청록, 갈색)
-        const colorPalette = [
-            [41, 128, 185], [192, 57, 43], [39, 174, 96], 
-            [142, 68, 173], [211, 84, 0], [22, 160, 133], [127, 140, 141]
-        ];
-        let colorIndex = 0;
+
+        function getRandomColor() {
+            const r = Math.floor(Math.random() * 200); 
+            const g = Math.floor(Math.random() * 200);
+            const b = Math.floor(Math.random() * 200);
+            return [r, g, b];
+        }
 
         if (data.transcripts.length > 0) {
             data.transcripts.forEach(t => {
-                // 발화자 색상 할당
                 if (!speakerColors[t.name]) {
-                    speakerColors[t.name] = colorPalette[colorIndex % colorPalette.length];
-                    colorIndex++;
+                    speakerColors[t.name] = getRandomColor();
                 }
                 const thisColor = speakerColors[t.name];
 
-                // 헤더: 이름 [시간]
                 const header = `${t.name} [${t.time}]`;
-                doc.setTextColor(...thisColor); // 이름에 색상 적용
+                doc.setTextColor(...thisColor); 
                 doc.text(header, margin, currentY);
                 currentY += 5;
 
-                // 내용
-                doc.setTextColor(0, 0, 0); // 내용은 검정
+                doc.setTextColor(0, 0, 0); 
                 const textLines = doc.splitTextToSize(t.text, contentWidth);
                 
                 const requiredHeight = (textLines.length * 5) + 10;
                 if (currentY + requiredHeight > pageHeight - margin) {
                     doc.addPage();
                     currentY = 20;
-                    // 페이지 넘김 후 헤더 반복 표시
                     doc.setTextColor(...thisColor);
                     doc.text(`${header} (계속)`, margin, currentY);
                     currentY += 5;

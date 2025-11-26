@@ -1,8 +1,29 @@
 /* ===============================
-   Chatbot & Sidebar Fetch
+   meetings.js - 회의록 목록 관리 (정렬/필터/검색 포함)
 =================================*/
+
+// 전체 데이터를 저장할 전역 변수
+let allMeetings = [];
+
 document.addEventListener("DOMContentLoaded", () => {
-    // 챗봇 로드
+    // 1. 사이드바 로드
+    fetch("components/sidebar.html")
+        .then(res => res.text())
+        .then(html => {
+            document.getElementById("sidebar-container").innerHTML = html;
+            if (typeof loadCurrentUser === 'function') loadCurrentUser();
+            
+            // 사이드바 활성화 로직 (홈 불빛 끄고 현재 페이지만 켜기)
+            const navItems = document.querySelectorAll(".nav-menu a");
+            navItems.forEach(el => el.classList.remove("active"));
+            navItems.forEach(item => {
+                if (item.getAttribute("href") === "meetings.html") {
+                    item.classList.add("active");
+                }
+            });
+        });
+
+    // 2. 챗봇 로드 및 이벤트 연결 (추가된 부분)
     fetch("components/chatbot.html")
         .then(res => res.text())
         .then(html => {
@@ -14,210 +35,300 @@ document.addEventListener("DOMContentLoaded", () => {
             const chatInput = container.querySelector("#chatInput");
             const floatingBtn = document.getElementById("floatingChatBtn");
 
-            if (closeBtn) closeBtn.addEventListener("click", closeChat);
-            if (sendBtn) sendBtn.addEventListener("click", sendMessage);
-            if (chatInput) chatInput.addEventListener("keypress", handleChatEnter);
-            if (floatingBtn) floatingBtn.addEventListener("click", openChat);
+            // [중요] chatbot.js 로드 시점 차이로 인한 오류 방지를 위해 화살표 함수로 감싸서 실행
+            if (closeBtn) {
+                closeBtn.addEventListener("click", () => {
+                    if (typeof closeChat === 'function') closeChat();
+                });
+            }
+
+            if (sendBtn) {
+                sendBtn.addEventListener("click", () => {
+                    if (typeof sendMessage === 'function') sendMessage();
+                });
+            }
+
+            if (chatInput) {
+                chatInput.addEventListener("keypress", (e) => {
+                    if (typeof handleChatEnter === 'function') handleChatEnter(e);
+                });
+            }
+
+            if (floatingBtn) {
+                floatingBtn.addEventListener("click", () => {
+                    if (typeof openChat === 'function') openChat();
+                });
+            }
         });
-    
-    // 사이드바 로드
-    fetch("components/sidebar.html")
-        .then(res => res.text())
-        .then(html => {
-            const sidebar = document.getElementById("sidebar-container");
-            sidebar.innerHTML = html;
 
-            // ✅ 사이드바 로드 후 사용자 정보 주입
-            loadCurrentUser();
+    // 3. 이벤트 리스너 등록 (정렬, 필터, 검색)
+    setupEventListeners();
 
-            // 현재 페이지 활성화
-            const currentPage = window.location.pathname.split("/").pop();
-            const navItems = sidebar.querySelectorAll(".nav-menu a");
-
-            navItems.forEach(item => {
-                const linkPath = item.getAttribute("href");
-                if (linkPath === currentPage) {
-                    item.classList.add("active");
-                } else {
-                    item.classList.remove("active");
-                }
-            });
-        })
-        .catch(error => {
-            console.error('사이드바 로드 실패:', error);
-        });
+    // 4. 데이터 불러오기
+    fetchMeetings();
 });
 
-
-
-// 사용자 정보 로드 함수 (API에서만)
-async function loadCurrentUser() {
-  try {
-    const response = await fetch('http://localhost:8080/api/auth/me', {
-      credentials: 'include'  // 이 옵션만 있으면 브라우저가 HttpOnly 쿠키를 요청에 자동 포함!
-    });
-    if (response.ok) {
-      const user = await response.json();
-      displayUserName(user);
-      return user;
-    } else if (response.status === 401) {
-      window.location.href = '/login.html';
-      return null;
-    } else {
-      displayUserName(null);
-      return null;
+function setupEventListeners() {
+    // 정렬 기준 변경
+    const sortSelect = document.getElementById('sortSelect');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', applyFilters);
     }
-  } catch (error) {
-    console.error('네트워크 오류', error);
-    displayUserName(null);
-    return null;
-  }
-}
 
-// 검색 토글
-const searchToggleBtn = document.getElementById('searchToggleBtn');
-const searchPanel = document.getElementById('searchPanel');
-const searchInput = document.getElementById('searchInput');
-const searchClearBtn = document.getElementById('searchClearBtn');
-
-if (searchToggleBtn) {
-  searchToggleBtn.addEventListener('click', () => {
-    searchPanel.classList.toggle('hidden');
-    if (!searchPanel.classList.contains('hidden')) {
-      searchInput.focus();
+    // 우선순위 필터 변경
+    const priorityFilter = document.getElementById('priorityFilter');
+    if (priorityFilter) {
+        priorityFilter.addEventListener('change', applyFilters);
     }
-  });
-}
 
-// 검색 입력 감지
-if (searchInput) {
-  searchInput.addEventListener('input', (e) => {
-    const wrapper = e.target.closest('.search-input-wrapper');
-    if (e.target.value.trim() !== '') {
-      wrapper.classList.add('has-value');
-    } else {
-      wrapper.classList.remove('has-value');
+    // 검색어 입력 (입력할 때마다 실시간 필터링)
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            // 검색창 스타일 (값이 있으면 X버튼 표시 등)
+            const wrapper = e.target.closest('.search-input-wrapper');
+            if (wrapper) {
+                e.target.value ? wrapper.classList.add('has-value') : wrapper.classList.remove('has-value');
+            }
+            applyFilters();
+        });
     }
-    
-    // 실제 검색 로직은 여기에 구현
-    filterMeetings(e.target.value);
-  });
-}
 
-// 검색 지우기
-if (searchClearBtn) {
-  searchClearBtn.addEventListener('click', () => {
-    searchInput.value = '';
-    searchInput.closest('.search-input-wrapper').classList.remove('has-value');
-    searchInput.focus();
-    filterMeetings('');
-  });
-}
-
-// 정렬 선택
-const sortSelect = document.getElementById('sortSelect');
-if (sortSelect) {
-  sortSelect.addEventListener('change', (e) => {
-    sortMeetings(e.target.value);
-  });
-}
-
-// 우선순위 필터
-const priorityFilter = document.getElementById('priorityFilter');
-if (priorityFilter) {
-  priorityFilter.addEventListener('change', (e) => {
-    filterByPriority(e.target.value);
-  });
-}
-
-// 회의록 필터링 (검색)
-function filterMeetings(query) {
-  const rows = document.querySelectorAll('.table-row');
-  const lowerQuery = query.toLowerCase();
-  
-  rows.forEach(row => {
-    // 두 번째 cell의 제목 가져오기
-    const titleCell = row.querySelectorAll('.table-cell')[1];
-    const title = titleCell ? titleCell.querySelector('.cell-primary').textContent.toLowerCase() : '';
-    const keywords = Array.from(row.querySelectorAll('.keyword-tag'))
-      .map(tag => tag.textContent.toLowerCase())
-      .join(' ');
-    
-    if (title.includes(lowerQuery) || keywords.includes(lowerQuery)) {
-      row.style.display = '';
-    } else {
-      row.style.display = 'none';
+    // 검색 초기화 버튼
+    const searchClearBtn = document.getElementById('searchClearBtn');
+    if (searchClearBtn) {
+        searchClearBtn.addEventListener('click', () => {
+            const input = document.getElementById('searchInput');
+            input.value = '';
+            input.closest('.search-input-wrapper').classList.remove('has-value');
+            applyFilters();
+        });
     }
-  });
+
+    // 검색 패널 토글 버튼
+    const searchToggleBtn = document.getElementById('searchToggleBtn');
+    const searchPanel = document.getElementById('searchPanel');
+    if (searchToggleBtn && searchPanel) {
+        searchToggleBtn.addEventListener('click', () => {
+            searchPanel.classList.toggle('hidden');
+            if (!searchPanel.classList.contains('hidden')) {
+                document.getElementById('searchInput').focus();
+            }
+        });
+    }
 }
 
-// 회의록 정렬
-function sortMeetings(sortType) {
-  const tableCard = document.querySelector('.table-card');
-  const rows = Array.from(document.querySelectorAll('.table-row'));
-  
-  console.log('정렬 전:', rows.map(r => r.querySelectorAll('.table-cell')[1].querySelector('.cell-primary').textContent));
-  
-  // 정렬
-  rows.sort((a, b) => {
-    switch(sortType) {
-      case 'date-desc': // 최신순
-        const dateA_desc = new Date(a.getAttribute('data-date'));
-        const dateB_desc = new Date(b.getAttribute('data-date'));
-        return dateB_desc - dateA_desc;
+/* 서버에서 데이터 가져오기 */
+async function fetchMeetings() {
+    try {
+        const response = await fetch('http://localhost:8080/api/meetings', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+
+        if (response.status === 401) {
+            alert("로그인이 필요합니다.");
+            window.location.href = "login.html";
+            return;
+        }
+
+        if (!response.ok) throw new Error("회의록 목록을 불러오지 못했습니다.");
+
+        // 전역 변수에 저장
+        allMeetings = await response.json();
         
-      case 'date-asc': // 오래된순
-        const dateA_asc = new Date(a.getAttribute('data-date'));
-        const dateB_asc = new Date(b.getAttribute('data-date'));
-        return dateA_asc - dateB_asc;
-      
-      case 'title-asc': // 제목순
-        const titleCellA = a.querySelectorAll('.table-cell')[1];
-        const titleCellB = b.querySelectorAll('.table-cell')[1];
-        const titleA = titleCellA.querySelector('.cell-primary').textContent.trim();
-        const titleB = titleCellB.querySelector('.cell-primary').textContent.trim();
-        const result = titleA.localeCompare(titleB, 'ko');
-        console.log(`비교: "${titleA}" vs "${titleB}" = ${result}`);
-        return result;
-      
-      case 'duration-desc': // 시간 긴 순
-        const durationA = parseInt(a.getAttribute('data-duration'));
-        const durationB = parseInt(b.getAttribute('data-duration'));
-        return durationB - durationA;
-      
-      default:
-        return 0;
+        // 초기 렌더링 (필터 적용)
+        applyFilters();
+
+    } catch (error) {
+        console.error("Error fetching meetings:", error);
+        showErrorState();
     }
-  });
-  
-  console.log('정렬 후:', rows.map(r => r.querySelectorAll('.table-cell')[1].querySelector('.cell-primary').textContent));
-  
-  // 모든 row를 detach
-  rows.forEach(row => row.parentNode.removeChild(row));
-  
-  // 정렬된 순서대로 다시 추가
-  rows.forEach(row => {
-    tableCard.appendChild(row);
-  });
-  
-  console.log('DOM 업데이트 완료');
 }
 
-// 우선순위별 필터
-function filterByPriority(priority) {
-  const rows = document.querySelectorAll('.table-row');
-  
-  rows.forEach(row => {
-    const rowPriority = row.getAttribute('data-priority');
-    if (priority === 'all' || rowPriority === priority) {
-      row.style.display = '';
-    } else {
-      row.style.display = 'none';
+/* 통합 필터링 및 정렬 로직 */
+function applyFilters() {
+    let result = [...allMeetings]; // 원본 보호를 위해 복사
+
+    // 1. 검색어 필터링
+    const searchInput = document.getElementById('searchInput');
+    const keyword = searchInput ? searchInput.value.trim().toLowerCase() : "";
+    
+    if (keyword) {
+        result = result.filter(m => {
+            const title = (m.title || "").toLowerCase();
+            // 키워드 배열(객체 or 문자열) 처리
+            const keywordsStr = (m.keywords || []).map(k => (typeof k === 'object' ? k.text : k).toLowerCase()).join(" ");
+            return title.includes(keyword) || keywordsStr.includes(keyword);
+        });
     }
-  });
+
+    // 2. 우선순위 필터링
+    const priorityFilter = document.getElementById('priorityFilter');
+    const priorityVal = priorityFilter ? priorityFilter.value : "all";
+
+    if (priorityVal !== "all") {
+        result = result.filter(m => {
+            // DTO 구조에 따라 importance가 문자열이거나 객체일 수 있음
+            let level = "MEDIUM";
+            if (m.importance) {
+                level = (typeof m.importance === 'object') ? m.importance.level : m.importance;
+            }
+            // 서버 데이터(HIGH)와 필터 값(high) 대소문자 매칭
+            return String(level).toUpperCase() === priorityVal.toUpperCase();
+        });
+    }
+
+    // 3. 정렬 (Sort)
+    const sortSelect = document.getElementById('sortSelect');
+    const sortVal = sortSelect ? sortSelect.value : "date-desc";
+
+    result.sort((a, b) => {
+        const dateA = new Date(a.scheduledAt || a.meetingDate || 0);
+        const dateB = new Date(b.scheduledAt || b.meetingDate || 0);
+        const durA = a.durationSeconds || 0;
+        const durB = b.durationSeconds || 0;
+        const titleA = (a.title || "").toLowerCase();
+        const titleB = (b.title || "").toLowerCase();
+
+        switch (sortVal) {
+            case 'date-desc': return dateB - dateA; // 최신순
+            case 'date-asc': return dateA - dateB;  // 오래된순
+            case 'title-asc': return titleA.localeCompare(titleB); // 제목순
+            case 'duration-desc': return durB - durA; // 긴 시간 순
+            default: return dateB - dateA;
+        }
+    });
+
+    renderMeetingList(result);
 }
 
-// 회의록 상세 페이지로 이동
-function goToMeetingDetail(meetingId) {
-  window.location.href = `meetingDetail.html?id=${meetingId}`;
+/* 목록 그리기 */
+function renderMeetingList(meetings) {
+    const tableCard = document.querySelector('.table-card');
+    const header = tableCard.querySelector('.table-header'); // 헤더 보존
+    
+    tableCard.innerHTML = '';
+    if (header) tableCard.appendChild(header);
+
+    if (!meetings || meetings.length === 0) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.style.padding = "60px 0";
+        emptyDiv.style.textAlign = "center";
+        emptyDiv.style.color = "#9ca3af";
+        emptyDiv.innerHTML = `
+            <div style="margin-bottom: 10px; font-size: 24px;">📭</div>
+            <p>조건에 맞는 회의록이 없습니다.</p>
+        `;
+        tableCard.appendChild(emptyDiv);
+        return;
+    }
+
+    meetings.forEach(meeting => {
+        // 날짜 포맷
+        const dateObj = new Date(meeting.scheduledAt || meeting.meetingDate);
+        const dateStr = `${(dateObj.getMonth()+1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+        const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
+
+        // 우선순위
+        let priority = "MEDIUM";
+        if (meeting.importance) {
+            priority = (typeof meeting.importance === 'object') ? meeting.importance.level : meeting.importance;
+        }
+        const pClass = getPriorityClass(priority);
+        const pLabel = getPriorityLabel(priority);
+
+        // 키워드
+        const keywordHtml = renderKeywords(meeting.keywords);
+
+        const row = document.createElement('div');
+        row.className = 'table-row';
+        row.onclick = () => goToMeetingDetail(meeting.meetingId || meeting.id); 
+
+        row.innerHTML = `
+            <div class="table-cell">
+                <span class="cell-primary">${dateStr}</span>
+                <span class="cell-secondary">${timeStr}</span>
+            </div>
+            <div class="table-cell">
+                <span class="cell-primary">${meeting.title}</span>
+            </div>
+            <div class="table-cell">
+                <span class="cell-secondary">${(meeting.participants || []).length}명</span>
+            </div>
+            <div class="table-cell">
+                <span class="cell-secondary">${formatDuration(meeting.durationSeconds || 0)}</span>
+            </div>
+            <div class="table-cell">
+                <span class="priority-badge ${pClass}">${pLabel}</span>
+            </div>
+            <div class="table-cell">
+                <div class="keyword-list">
+                    ${keywordHtml}
+                </div>
+            </div>
+        `;
+        tableCard.appendChild(row);
+    });
+}
+
+// 에러 표시 함수
+function showErrorState() {
+    const tableCard = document.querySelector('.table-card');
+    const header = tableCard.querySelector('.table-header');
+    tableCard.innerHTML = '';
+    if(header) tableCard.appendChild(header);
+    
+    const errDiv = document.createElement('div');
+    errDiv.style.padding = "20px";
+    errDiv.style.textAlign = "center";
+    errDiv.style.color = "#ef4444";
+    errDiv.innerHTML = "데이터를 불러오는 중 오류가 발생했습니다.<br>잠시 후 다시 시도해주세요.";
+    tableCard.appendChild(errDiv);
+}
+
+// --- 헬퍼 함수들 ---
+
+function getPriorityClass(p) {
+    if (!p) return 'medium';
+    p = String(p).toUpperCase();
+    if (p === 'HIGH' || p === '높음') return 'high';
+    if (p === 'LOW' || p === '낮음') return 'low';
+    return 'medium';
+}
+
+function getPriorityLabel(p) {
+    if (!p) return '보통';
+    p = String(p).toUpperCase();
+    if (p === 'HIGH' || p === '높음') return '높음';
+    if (p === 'LOW' || p === '낮음') return '낮음';
+    return '보통';
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return "0분";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}시간 ${m}분`;
+    return `${m}분`;
+}
+
+function renderKeywords(keywords) {
+    if (!keywords || keywords.length === 0) return '';
+    
+    // DTO: [{text: "키워드", source: "AI"}, ...] 또는 ["키워드", ...]
+    const list = keywords.map(k => (typeof k === 'object' ? k.text : k));
+    
+    const max = 2;
+    let html = list.slice(0, max).map(k => `<span class="keyword-tag">#${k}</span>`).join('');
+    
+    if (list.length > max) {
+        html += `<span class="keyword-more">+${list.length - max}</span>`;
+    }
+    return html;
+}
+
+function goToMeetingDetail(id) {
+    if(id) window.location.href = `meetingDetail.html?id=${id}`;
 }
