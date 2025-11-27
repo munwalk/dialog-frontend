@@ -96,9 +96,9 @@ function showErrorModal(msg) {
 async function loadMeetingDetail(meetingId) {
     try {
         const [metaRes, transRes, recRes] = await Promise.all([
-            fetch(`http://localhost:8080/api/meetings/${meetingId}`, { credentials: 'include' }),
-            fetch(`http://localhost:8080/api/transcripts/meeting/${meetingId}`, { credentials: 'include' }),
-            fetch(`http://localhost:8080/api/recordings/meeting/${meetingId}`, { credentials: 'include' })
+            fetch(`http://dialogai.duckdns.org:8080/api/meetings/${meetingId}`, { credentials: 'include' }),
+            fetch(`http://dialogai.duckdns.org:8080/api/transcripts/meeting/${meetingId}`, { credentials: 'include' }),
+            fetch(`http://dialogai.duckdns.org:8080/api/recordings/meeting/${meetingId}`, { credentials: 'include' })
         ]);
 
         // 1. 기본 정보(metaRes)는 필수이므로 실패 시 에러 처리
@@ -707,7 +707,7 @@ async function confirmDeleteProcess() {
     if (!meetingData || !meetingData.id) return;
 
     try {
-        const response = await fetch(`http://localhost:8080/api/meetings/${meetingData.id}`, {
+        const response = await fetch(`http://dialogai.duckdns.org:8080/api/meetings/${meetingData.id}`, {
             method: 'DELETE',
             credentials: 'include'
         });
